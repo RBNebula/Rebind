@@ -29,34 +29,10 @@ internal sealed class RebindUiStyleSet
 internal static class RebindUiStylePresets
 {
     public const string Style1 = "style_1";
-    public const string Style2 = "style_2";
     public const string DefaultPresetId = Style1;
 
-    private static readonly string[] PresetIds =
+    public static RebindUiStyleSet Build(string? _presetId, float windowOpacity, bool includeSliderStyles)
     {
-        Style1,
-        Style2
-    };
-
-    public static string NormalizePresetId(string? presetId)
-    {
-        if (string.IsNullOrWhiteSpace(presetId)) return DefaultPresetId;
-        var requested = presetId!.Trim();
-
-        for (var i = 0; i < PresetIds.Length; i++)
-        {
-            if (string.Equals(PresetIds[i], requested, StringComparison.OrdinalIgnoreCase))
-            {
-                return PresetIds[i];
-            }
-        }
-
-        return DefaultPresetId;
-    }
-
-    public static RebindUiStyleSet Build(string? presetId, float windowOpacity, bool includeSliderStyles)
-    {
-        var normalizedPresetId = NormalizePresetId(presetId);
         var opacity = Mathf.Clamp01(windowOpacity);
 
         var textColor = new Color(0.9f, 0.9f, 0.9f, 1f);
@@ -68,19 +44,6 @@ internal static class RebindUiStylePresets
         var buttonNormalColor = new Color(0.16f, 0.21f, 0.26f, 0.95f);
         var buttonHoverColor = new Color(0.22f, 0.29f, 0.36f, 0.98f);
         var buttonActiveColor = new Color(0.11f, 0.16f, 0.21f, 1f);
-
-        if (string.Equals(normalizedPresetId, Style2, StringComparison.Ordinal))
-        {
-            textColor = new Color(0.96f, 0.94f, 0.88f, 1f);
-            fieldColor = new Color(0.10f, 0.08f, 0.08f, 1f);
-            sliderBackgroundColor = new Color(0.20f, 0.16f, 0.13f, 1f);
-            sliderThumbColor = new Color(1.00f, 0.64f, 0.24f, 1f);
-            top = new Color(0.33f, 0.22f, 0.14f, 0.92f);
-            bottom = new Color(0.07f, 0.05f, 0.04f, 0.96f);
-            buttonNormalColor = new Color(0.28f, 0.18f, 0.12f, 0.96f);
-            buttonHoverColor = new Color(0.38f, 0.24f, 0.15f, 0.99f);
-            buttonActiveColor = new Color(0.20f, 0.12f, 0.08f, 1f);
-        }
 
         top.a *= opacity;
         bottom.a *= opacity;
