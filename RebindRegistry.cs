@@ -9,24 +9,6 @@ internal static class RebindRegistry
     private static bool _dirty = true;
     private static int _version;
 
-    public static RebindHandle Register(
-        string sectionTitle,
-        string keybindTitle,
-        Func<KeyCode> getter,
-        Action<KeyCode> setter,
-        KeyCode defaultKey,
-        Action<KeyCode>? onChanged)
-    {
-        if (getter == null) throw new ArgumentNullException(nameof(getter));
-        if (setter == null) throw new ArgumentNullException(nameof(setter));
-        var entry = CreateRegisteredBaseEntry(ref sectionTitle, ref keybindTitle);
-        entry.Getter = getter;
-        entry.Setter = setter;
-        entry.DefaultKey = defaultKey;
-        entry.OnChanged = onChanged;
-        return AddEntryAndCreateHandle(entry);
-    }
-
     public static RebindHandle RegisterShortcut(
         string sectionTitle,
         string keybindTitle,
@@ -186,11 +168,7 @@ internal sealed class RebindEntry
     public int SortOrder { get; set; }
     public string SectionTitle { get; set; } = string.Empty;
     public string KeybindTitle { get; set; } = string.Empty;
-    public RebindEntryMode Mode { get; set; } = RebindEntryMode.KeyCode;
-    public Func<KeyCode> Getter { get; set; } = () => KeyCode.None;
-    public Action<KeyCode> Setter { get; set; } = _ => { };
-    public KeyCode DefaultKey { get; set; } = KeyCode.None;
-    public Action<KeyCode>? OnChanged { get; set; }
+    public RebindEntryMode Mode { get; set; } = RebindEntryMode.KeyboardShortcut;
     public Func<KeyboardShortcut> ShortcutGetter { get; set; } = () => KeyboardShortcut.Empty;
     public Action<KeyboardShortcut> ShortcutSetter { get; set; } = _ => { };
     public KeyboardShortcut DefaultShortcut { get; set; } = KeyboardShortcut.Empty;
@@ -209,10 +187,6 @@ internal sealed class RebindEntry
             SectionTitle = SectionTitle,
             KeybindTitle = KeybindTitle,
             Mode = Mode,
-            Getter = Getter,
-            Setter = Setter,
-            DefaultKey = DefaultKey,
-            OnChanged = OnChanged,
             ShortcutGetter = ShortcutGetter,
             ShortcutSetter = ShortcutSetter,
             DefaultShortcut = DefaultShortcut,
@@ -227,7 +201,6 @@ internal sealed class RebindEntry
 
 internal enum RebindEntryMode
 {
-    KeyCode = 0,
-    InputAction = 1,
-    KeyboardShortcut = 2
+    InputAction = 0,
+    KeyboardShortcut = 1
 }

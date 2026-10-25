@@ -4,6 +4,7 @@ internal static partial class RebindMenuInjector
 {
     private sealed class InjectedMenuState
     {
+        private static readonly Dictionary<string, (Color keybind, Color value)> NativeDefaultColorsByStableKey = new(StringComparer.Ordinal);
         private readonly GameObject _keybindPage;
         private readonly List<GameObject> _spawnedObjects = new();
         private readonly List<RebindRowController> _modRows = new();
@@ -195,6 +196,21 @@ internal static partial class RebindMenuInjector
 
         private void RebuildNativeRowVisuals(List<Component> keybindRows)
         {
+            var existingDefaultsByRowId = new Dictionary<int, (Color keybind, Color value)>();
+            var existingDefaultsByStableKey = new Dictionary<string, (Color keybind, Color value)>(StringComparer.Ordinal);
+            for (var i = 0; i < _nativeRows.Count; i++)
+            {
+                var existing = _nativeRows[i];
+                var row = existing.Row;
+                if (row == null) continue;
+                existingDefaultsByRowId[row.GetInstanceID()] = (existing.KeybindDefaultColor, existing.ValueDefaultColor);
+                var stableKey = existing.GetStableKey();
+                if (!string.IsNullOrWhiteSpace(stableKey))
+                {
+                    existingDefaultsByStableKey[stableKey] = (existing.KeybindDefaultColor, existing.ValueDefaultColor);
+                }
+            }
+
             _nativeRows.Clear();
             foreach (var row in keybindRows)
             {
@@ -207,19 +223,79 @@ internal static partial class RebindMenuInjector
                 var keybindLabel = BaseLabelField?.GetValue(setting) as TMP_Text;
                 var valueLabel = KeybindValueLabelField?.GetValue(setting) as TMP_Text;
                 var action = SettingKeybindActionField?.GetValue(setting);
+                var sectionTitle = ResolveNativeRowSectionTitle(setting.transform);
+                var keybindTitle = keybindLabel != null ? keybindLabel.text?.Trim() ?? string.Empty : string.Empty;
+                var stableKey = BuildNativeRowStableKey(action, sectionTitle, keybindTitle);
+                var rowId = setting.GetInstanceID();
+                var keybindDefaultColor = keybindLabel != null ? keybindLabel.color : Color.white;
+                var valueDefaultColor = valueLabel != null ? valueLabel.color : Color.white;
+                if (existingDefaultsByRowId.TryGetValue(rowId, out var preservedDefaults))
+                {
+                    keybindDefaultColor = preservedDefaults.keybind;
+                    valueDefaultColor = preservedDefaults.value;
+                }
+                else if (!string.IsNullOrWhiteSpace(stableKey))
+                {
+                    if (existingDefaultsByStableKey.TryGetValue(stableKey, out preservedDefaults) ||
+                        NativeDefaultColorsByStableKey.TryGetValue(stableKey, out preservedDefaults))
+                    {
+                        keybindDefaultColor = preservedDefaults.keybind;
+                        valueDefaultColor = preservedDefaults.value;
+                    }
+                    else
+                    {
+                        if (keybindLabel != null && ColorsMatch(keybindLabel.color, RebindRowController.ConflictColor))
+                        {
+                            keybindDefaultColor = Color.white;
+                        }
+
+                        if (valueLabel != null && ColorsMatch(valueLabel.color, RebindRowController.ConflictColor))
+                        {
+                            valueDefaultColor = Color.white;
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(stableKey) &&
+                    !ColorsMatch(keybindDefaultColor, RebindRowController.ConflictColor) &&
+                    !ColorsMatch(valueDefaultColor, RebindRowController.ConflictColor))
+                {
+                    NativeDefaultColorsByStableKey[stableKey] = (keybindDefaultColor, valueDefaultColor);
+                }
 
                 _nativeRows.Add(new NativeKeybindRowVisual
                 {
                     Row = setting,
                     ActionEnum = action,
-                    SectionTitle = ResolveNativeRowSectionTitle(setting.transform),
-                    KeybindTitle = keybindLabel != null ? keybindLabel.text?.Trim() ?? string.Empty : string.Empty,
+                    SectionTitle = sectionTitle,
+                    KeybindTitle = keybindTitle,
                     KeybindLabel = keybindLabel,
                     ValueLabel = valueLabel,
-                    KeybindDefaultColor = keybindLabel != null ? keybindLabel.color : Color.white,
-                    ValueDefaultColor = valueLabel != null ? valueLabel.color : Color.white
+                    KeybindDefaultColor = keybindDefaultColor,
+                    ValueDefaultColor = valueDefaultColor
                 });
             }
+        }
+
+        private static string BuildNativeRowStableKey(object? actionEnum, string sectionTitle, string keybindTitle)
+        {
+            var actionName = actionEnum?.ToString();
+            if (!string.IsNullOrWhiteSpace(actionName))
+            {
+                return "action:" + actionName.Trim();
+            }
+
+            var section = sectionTitle?.Trim() ?? string.Empty;
+            var keybind = keybindTitle?.Trim() ?? string.Empty;
+            return $"label:{section}|{keybind}";
+        }
+
+        private static bool ColorsMatch(Color left, Color right)
+        {
+            return Mathf.Approximately(left.r, right.r) &&
+                   Mathf.Approximately(left.g, right.g) &&
+                   Mathf.Approximately(left.b, right.b) &&
+                   Mathf.Approximately(left.a, right.a);
         }
 
         private string ResolveNativeRowSectionTitle(Transform rowTransform)
@@ -646,6 +722,19 @@ internal static partial class RebindMenuInjector
         {
             if (KeybindLabel != null) KeybindLabel.color = hasConflict ? conflictColor : KeybindDefaultColor;
             if (ValueLabel != null) ValueLabel.color = hasConflict ? conflictColor : ValueDefaultColor;
+        }
+
+        public string GetStableKey()
+        {
+            var actionName = ActionEnum?.ToString();
+            if (!string.IsNullOrWhiteSpace(actionName))
+            {
+                return "action:" + actionName.Trim();
+            }
+
+            var section = SectionTitle?.Trim() ?? string.Empty;
+            var keybind = KeybindTitle?.Trim() ?? string.Empty;
+            return $"label:{section}|{keybind}";
         }
 
         public bool MatchesSearchFilter(SearchFilterQuery query)

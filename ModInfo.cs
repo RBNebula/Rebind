@@ -2,12 +2,13 @@ namespace Rebind;
 
 internal static class ModInfo
 {
-    // Core plugin metadata (currently used).
     public const string PLUGIN_GUID = "com.rebind";
     public const string PLUGIN_NAME = "Rebind";
-    public const string PLUGIN_VERSION = "1.3.0";
+    public const string PLUGIN_VERSION = "1.3.1";
+    public const string ASSEMBLY_VERSION = "1.3.1.0";
+    public const string FILE_VERSION = "1.3.1.0";
+    public const string INFORMATIONAL_VERSION = "1.3.1";
 
-    // Suggested extras (preview only, not yet integrated).
     public const string HARMONY_ID = PLUGIN_GUID;
     public const string LOG_PREFIX = "[Rebind]";
     public const string DISPLAY_NAME_SHORT = "Rebind";

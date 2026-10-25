@@ -1,209 +1,303 @@
 # Rebind
 
-Injects a `MODS` section into the game's keybind menu and lets mods register keybind rows with one call.
+Rebind injects a `MODS` section into the game's keybind menu and lets mods register their own keybind rows.
 
-## Features
+## What Rebind handles
 
-- Uses the game's existing keybind menu styling.
-- Supports grouped mod sections under `MODS`.
-- Conflict detection:
-  - conflicting rows are highlighted red
-  - conflict popup appears with `Continue` / `Reset`
-- Supports `KeyboardShortcut` and `InputAction` registration.
-- Reset button visibility tracks whether a binding is currently at its default.
+- UI row injection in the game's keybind menu.
+- Reset-to-default behavior.
+- Conflict highlighting and conflict prompt.
+- Key capture for:
+  - `KeyboardShortcut` keybinds.
+  - `InputAction` bindings.
+- External `Input.GetKey*` suppression while Rebind is actively capturing or showing conflict prompt.
 
-## API
+## Integration methods
 
-### `RegisterKeybind` (single key or shortcut)
+Use one of these depending on how much control you want.
 
-This is the primary keybind registration call:
+1. `RegisterManagedKeybind` (recommended for most mods)
+2. `RegisterKeybind` (you own persistence)
+3. `RegisterInputActionBinding` (Unity Input System actions)
+4. Reflection-based registration (no compile-time reference)
 
-```csharp
-private KeyboardShortcut _toggleBind = new(KeyCode.G);
-private static readonly KeyboardShortcut DefaultToggleBind = new(KeyCode.G);
+---
 
-var handle = RebindApi.RegisterKeybind(
-    sectionTitle: "My Mod",
-    keybindTitle: "Toggle Advanced Mode",
-    getter: () => _toggleBind,
-    setter: bind => _toggleBind = bind,
-    defaultKeybind: DefaultToggleBind,
-    onChanged: _ => SaveSettings());
-```
+## 1) Managed Packet Method (Recommended)
 
-- Capture supports both:
-  - single key (example: `G`)
-  - modifier shortcuts (example: `Ctrl + G`, `Ctrl + A + B`)
-- Runtime usage:
+`RegisterManagedKeybind` is the simplest integration path.  
+You provide a packet with metadata + default + apply callback, and Rebind persists values for you.
 
-```csharp
-if (_toggleBind.IsDown())
-{
-    // ...
-}
-```
+### What you supply
 
-- Hold usage:
+- `PluginGuid` (required): your mod GUID, for persistence scope.
+- `BindingId` (recommended): stable ID for this bind inside your plugin scope.
+- `SectionTitle`: group title shown under `MODS`.
+- `KeybindTitle`: row title.
+- `DefaultKeybind`: default value.
+- `Apply` (required): receives effective keybind and applies it to your runtime field.
+- `OnChanged` (optional): callback after save/apply on user changes.
 
-```csharp
-if (_toggleBind.IsPressed())
-{
-    // runs every frame while held
-}
-```
-
-- `sectionTitle`: Group title shown under `MODS`.
-- `keybindTitle`: Row title.
-- `getter`: Returns the current shortcut.
-- `setter`: Applies the new shortcut.
-- `defaultKeybind`: Used by row reset button.
-- `onChanged`: Optional callback for side effects (save, toast, etc).
-
-### `InputAction` registration (explicit default recommended)
-
-```csharp
-var handle = RebindApi.RegisterInputActionBinding(
-    sectionTitle: "My Mod",
-    keybindTitle: "Toggle Scanner",
-    actionRef: myActionReference,
-    bindingIndex: 0,
-    defaultBindingPath: "<Keyboard>/r",
-    onChanged: () => SaveSettings());
-```
-
-- `defaultBindingPath` is used by reset and default-state detection.
-- Use Input System path syntax (example: `<Keyboard>/r`, `<Keyboard>/f8`).
-
-### `InputAction` registration (overload without explicit default)
-
-```csharp
-var handle = RebindApi.RegisterInputActionBinding(
-    sectionTitle: "My Mod",
-    keybindTitle: "Toggle Scanner",
-    actionRef: myActionReference,
-    bindingIndex: 0,
-    onChanged: () => SaveSettings());
-```
-
-- `actionRef`: Unity Input System action reference.
-- `bindingIndex`: Which binding slot of that action to rebind/reset.
-- `onChanged`: Optional callback after apply/reset.
-- Without `defaultBindingPath`, reset falls back to the action's base binding / no override.
-
-## Integration Notes
-
-- Add soft dependency if your mod can use Rebind when present:
-
-```csharp
-[BepInDependency("com.rebind", BepInDependency.DependencyFlags.SoftDependency)]
-```
-
-- If load order may vary, retry registration until Rebind is available.
-- Keep returned handles and dispose on unload.
-
-### Runtime Input Gating
-
-Rebind handles keybind registration and keybind menu UI.  
-Your mod still controls runtime input polling in `Update()`.
-
-If your mod uses its own hotkey gating system, keep applying it before your input checks.
-
-## Cleanup
-
-Dispose returned handle(s) when your mod unloads to remove rows:
-
-```csharp
-handle.Dispose();
-```
-
-## Complete Demo: Single Key + Shortcut Keybinds
-
-This example keeps it minimal:
-- registers two keybinds in `MODS`
-  - one single key (`T`)
-  - one shortcut (`LeftControl + Y`)
-- toggles two independent features
-- logs state changes
+### Example
 
 ```csharp
 using System;
-using System.Collections.Generic;
 using BepInEx;
 using UnityEngine;
 
-[BepInPlugin("com.example.toggledemo", "Toggle Demo", "1.0.0")]
+[BepInPlugin("com.example.packetdemo", "Packet Demo", "1.0.0")]
 [BepInDependency("com.rebind", BepInDependency.DependencyFlags.SoftDependency)]
-public sealed class ToggleDemo : BaseUnityPlugin
+public sealed class PacketDemoPlugin : BaseUnityPlugin
 {
-    private readonly List<IDisposable> _rebindHandles = new();
-    private KeyboardShortcut _singleKeyBind = new(KeyCode.T);
-    private static readonly KeyboardShortcut DefaultSingleKeyBind = new(KeyCode.T);
-    private KeyboardShortcut _shortcutBind = new(KeyCode.Y, KeyCode.LeftControl);
-    private static readonly KeyboardShortcut DefaultShortcutBind = new(KeyCode.Y, KeyCode.LeftControl);
-
-    private bool _singleKeyFeatureEnabled;
-    private bool _shortcutFeatureEnabled;
+    private IDisposable? _rebindHandle;
+    private KeyboardShortcut _toggleBind = new(KeyCode.G);
 
     private void Awake()
     {
-        _rebindHandles.Add(RebindApi.RegisterKeybind(
-            sectionTitle: "Toggle Demo",
-            keybindTitle: "Toggle Feature (Single Key)",
-            getter: () => _singleKeyBind,
-            setter: bind => _singleKeyBind = bind,
-            defaultKeybind: DefaultSingleKeyBind));
-
-        _rebindHandles.Add(RebindApi.RegisterKeybind(
-            sectionTitle: "Toggle Demo",
-            keybindTitle: "Toggle Feature (Shortcut)",
-            getter: () => _shortcutBind,
-            setter: bind => _shortcutBind = bind,
-            defaultKeybind: DefaultShortcutBind));
+        _rebindHandle = RebindApi.RegisterManagedKeybind(new ManagedKeybindPacket
+        {
+            PluginGuid = "com.example.packetdemo",
+            BindingId = "toggle_advanced_mode",
+            SectionTitle = "Packet Demo",
+            KeybindTitle = "Toggle Advanced Mode",
+            DefaultKeybind = new KeyboardShortcut(KeyCode.G),
+            Apply = bind => _toggleBind = bind,
+            OnChanged = bind => Logger.LogInfo($"Packet Demo bind changed: {bind.MainKey}")
+        });
     }
 
     private void Update()
     {
-        if (_singleKeyBind.IsDown())
+        if (_toggleBind.IsDown())
         {
-            _singleKeyFeatureEnabled = !_singleKeyFeatureEnabled;
-            Logger.LogInfo($"Single-key feature enabled: {_singleKeyFeatureEnabled}");
-        }
-
-        if (_shortcutBind.IsDown())
-        {
-            _shortcutFeatureEnabled = !_shortcutFeatureEnabled;
-            Logger.LogInfo($"Shortcut feature enabled: {_shortcutFeatureEnabled}");
+            Logger.LogInfo("Toggled.");
         }
     }
 
     private void OnDestroy()
     {
-        for (var i = 0; i < _rebindHandles.Count; i++)
-        {
-            try { _rebindHandles[i].Dispose(); }
-            catch { }
-        }
-        _rebindHandles.Clear();
+        _rebindHandle?.Dispose();
     }
 }
 ```
 
-Note:
-- If you do not reference `Rebind.dll` at compile time, use reflection-based registration instead.
+### How Rebind saves for you
+
+Rebind stores managed packet keybinds in:
+
+- Config file: `BepInEx/config/com.rebind.managed.cfg`
+- Section format: `Managed.<PluginGuid>`
+- Key format: `<BindingId>`
+- Value format: `MainKey+Modifier1+Modifier2` (example: `G+LeftControl`)
+
+Behavior:
+
+1. On registration, Rebind loads saved value by `PluginGuid + BindingId`.
+2. If no valid saved value exists, Rebind uses `DefaultKeybind`.
+3. Rebind calls `Apply(effectiveValue)` immediately.
+4. When user changes bind in menu, Rebind saves it, applies it, then calls `OnChanged` (if provided).
+
+If `BindingId` is empty, Rebind builds one from `SectionTitle.KeybindTitle`.
+
+---
+
+## 2) Direct `RegisterKeybind` (You Persist)
+
+Use this if you want your mod to own its own config format and saving rules.
+
+### What you supply
+
+- `sectionTitle`
+- `keybindTitle`
+- `getter` (returns current `KeyboardShortcut`)
+- `setter` (applies new `KeyboardShortcut`)
+- `defaultKeybind`
+- `onChanged` (optional, usually where you save your config)
+
+### Example
+
+```csharp
+using System;
+using BepInEx;
+using BepInEx.Configuration;
+using UnityEngine;
+
+[BepInPlugin("com.example.directdemo", "Direct Demo", "1.0.0")]
+[BepInDependency("com.rebind", BepInDependency.DependencyFlags.SoftDependency)]
+public sealed class DirectDemoPlugin : BaseUnityPlugin
+{
+    private IDisposable? _rebindHandle;
+    private ConfigEntry<KeyboardShortcut> _toggleBind = null!;
+
+    private void Awake()
+    {
+        _toggleBind = Config.Bind("Input", "ToggleBind", new KeyboardShortcut(KeyCode.G), "Toggle keybind.");
+
+        _rebindHandle = RebindApi.RegisterKeybind(
+            sectionTitle: "Direct Demo",
+            keybindTitle: "Toggle Feature",
+            getter: () => _toggleBind.Value,
+            setter: bind => _toggleBind.Value = bind,
+            defaultKeybind: new KeyboardShortcut(KeyCode.G),
+            onChanged: _ =>
+            {
+                try { Config.Save(); }
+                catch { }
+            });
+    }
+
+    private void Update()
+    {
+        if (_toggleBind.Value.IsDown())
+        {
+            Logger.LogInfo("Toggled.");
+        }
+    }
+
+    private void OnDestroy()
+    {
+        _rebindHandle?.Dispose();
+    }
+}
+```
+
+---
+
+## 3) `RegisterInputActionBinding` (Input System)
+
+Use this when your mod already uses Unity Input System `InputActionReference`.
+
+### Overloads
+
+- With explicit default path:
+  - `RegisterInputActionBinding(sectionTitle, keybindTitle, actionRef, bindingIndex, defaultBindingPath, onChanged)`
+- Without explicit default path:
+  - `RegisterInputActionBinding(sectionTitle, keybindTitle, actionRef, bindingIndex, onChanged)`
+
+### Example
+
+```csharp
+_rebindHandle = RebindApi.RegisterInputActionBinding(
+    sectionTitle: "My Mod",
+    keybindTitle: "Toggle Scanner",
+    actionRef: scannerActionReference,
+    bindingIndex: 0,
+    defaultBindingPath: "<Keyboard>/r",
+    onChanged: () =>
+    {
+        try { SaveInputConfig(); }
+        catch { }
+    });
+```
+
+Notes:
+
+- `defaultBindingPath` is recommended for predictable reset/default-state behavior.
+- Path format uses Input System path syntax (example: `<Keyboard>/r`, `<Keyboard>/f8`).
+
+---
+
+## 4) Reflection-Based Integration (No Rebind.dll Reference)
+
+Use this if you want optional runtime integration without compile-time dependency.
+
+### Example (managed packet method via reflection)
+
+```csharp
+using System;
+using System.Linq;
+using System.Reflection;
+using BepInEx;
+using UnityEngine;
+
+private IDisposable? _rebindHandle;
+private KeyboardShortcut _bind = new(KeyCode.G);
+
+private bool TryRegisterWithRebind()
+{
+    var apiType = AppDomain.CurrentDomain
+        .GetAssemblies()
+        .Select(a => a.GetType("Rebind.RebindApi", throwOnError: false))
+        .FirstOrDefault(t => t != null);
+    if (apiType == null) return false;
+
+    var packetType = AppDomain.CurrentDomain
+        .GetAssemblies()
+        .Select(a => a.GetType("Rebind.ManagedKeybindPacket", throwOnError: false))
+        .FirstOrDefault(t => t != null);
+    if (packetType == null) return false;
+
+    var packet = Activator.CreateInstance(packetType);
+    if (packet == null) return false;
+
+    packetType.GetProperty("PluginGuid")?.SetValue(packet, "com.example.reflectdemo");
+    packetType.GetProperty("BindingId")?.SetValue(packet, "toggle_feature");
+    packetType.GetProperty("SectionTitle")?.SetValue(packet, "Reflect Demo");
+    packetType.GetProperty("KeybindTitle")?.SetValue(packet, "Toggle Feature");
+    packetType.GetProperty("DefaultKeybind")?.SetValue(packet, new KeyboardShortcut(KeyCode.G));
+    packetType.GetProperty("Apply")?.SetValue(packet, new Action<KeyboardShortcut>(bind => _bind = bind));
+
+    var register = apiType.GetMethod(
+        "RegisterManagedKeybind",
+        BindingFlags.Public | BindingFlags.Static,
+        binder: null,
+        types: new[] { packetType },
+        modifiers: null);
+    if (register == null) return false;
+
+    var handle = register.Invoke(null, new object[] { packet });
+    if (handle is IDisposable disposable)
+    {
+        _rebindHandle = disposable;
+        return true;
+    }
+
+    return false;
+}
+```
+
+---
+
+## Runtime input behavior
+
+Rebind suppresses external `Input.GetKey`, `Input.GetKeyDown`, and `Input.GetKeyUp` calls while:
+
+- key capture is active, or
+- conflict prompt is visible.
+
+This prevents integrated mods from firing hotkeys while rebinding.
+
+---
+
+## Cleanup
+
+Always dispose returned handles on unload:
+
+```csharp
+_rebindHandle?.Dispose();
+_rebindHandle = null;
+```
+
+---
+
+## Troubleshooting
+
+- Rebind not present:
+  - use soft dependency and null-safe integration.
+- Nothing appears in menu:
+  - verify registration runs after plugin load.
+- Managed packet not saving:
+  - check `BepInEx/config/com.rebind.managed.cfg`.
+  - verify stable `PluginGuid` + `BindingId`.
+
+---
 
 ## Attributions
 
-### External Libraries
-- **BepInEx** - plugin framework used by this mod.
-- **Harmony (HarmonyLib)** - runtime patching library used for method patching/injection.
-- **Unity APIs** (`UnityEngine`, `Unity Input System`, `TMPro`) - used through the game's runtime/API surface.
+- BepInEx
+- Harmony (HarmonyLib)
+- Unity APIs (`UnityEngine`, Input System, TMPro)
 
-## License Notice (MIT)
+## License
 
-This project is distributed under the MIT License.
-
-MIT requires that distributed copies/substantial portions include:
-- the copyright notice
-- the permission notice (license text)
-
-Keep the `LICENSE` file with redistributed copies.
+This project is MIT licensed. Keep `LICENSE` with redistributed copies.

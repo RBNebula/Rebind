@@ -39,7 +39,7 @@ public sealed class Rebind : BaseUnityPlugin
     private void PatchRuntimeBridges()
     {
         TryPatchSettingsMenu();
-        TryPatchHotkeyGate();
+        TryPatchInputSuppressionBridge();
     }
 
     private void TryPatchSettingsMenu()
@@ -152,10 +152,12 @@ public sealed class Rebind : BaseUnityPlugin
             if (settingKeybindType == null) return;
 
             var startRebindMethod = AccessTools.Method(settingKeybindType, "StartRebind");
+            var resetBindMethod = AccessTools.Method(settingKeybindType, "ResetBind");
             var updateUiMethod = AccessTools.Method(settingKeybindType, "UpdateUI");
             var onDisableMethod = AccessTools.Method(settingKeybindType, "OnDisable");
 
             var startRebindPrefix = AccessTools.Method(typeof(Rebind), nameof(OnSettingKeybindStartRebindPrefix));
+            var resetBindPostfix = AccessTools.Method(typeof(Rebind), nameof(OnSettingKeybindResetBindPostfix));
             var updateUiPostfix = AccessTools.Method(typeof(Rebind), nameof(OnSettingKeybindUpdateUiPostfix));
             var onDisablePostfix = AccessTools.Method(typeof(Rebind), nameof(OnSettingKeybindOnDisablePostfix));
 
@@ -167,6 +169,11 @@ public sealed class Rebind : BaseUnityPlugin
             if (updateUiMethod != null && updateUiPostfix != null)
             {
                 harmony.Patch(updateUiMethod, postfix: new HarmonyMethod(updateUiPostfix));
+            }
+
+            if (resetBindMethod != null && resetBindPostfix != null)
+            {
+                harmony.Patch(resetBindMethod, postfix: new HarmonyMethod(resetBindPostfix));
             }
 
             if (onDisableMethod != null && onDisablePostfix != null)
@@ -182,25 +189,11 @@ public sealed class Rebind : BaseUnityPlugin
         }
     }
 
-    private void TryPatchHotkeyGate()
+    private void TryPatchInputSuppressionBridge()
     {
-        try
-        {
-            var hotkeyGateType = AccessTools.TypeByName("RBN.Modlib.Game.HotkeyGate");
-            var isHotkeyInputEnabled = AccessTools.Method(hotkeyGateType, "IsHotkeyInputEnabled");
-            var postfix = AccessTools.Method(typeof(Rebind), nameof(OnHotkeyGateIsHotkeyInputEnabledPostfix));
-            if (isHotkeyInputEnabled == null || postfix == null) return;
-
-            var harmony = GetHarmonyOrWarn("HotkeyGate suppression bridge");
-            if (harmony == null) return;
-
-            harmony.Patch(isHotkeyInputEnabled, postfix: new HarmonyMethod(postfix));
-            Logger.LogInfo("Patched HotkeyGate suppression bridge.");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning($"Failed to patch HotkeyGate bridge: {ex.Message}");
-        }
+        var harmony = GetHarmonyOrWarn("input suppression");
+        if (harmony == null) return;
+        RebindInputSuppression.TryPatch(harmony, Logger);
     }
 
     private void OnDestroy()
@@ -260,16 +253,14 @@ public sealed class Rebind : BaseUnityPlugin
         RebindMenuInjector.NotifyNativeKeybindUpdated(__instance);
     }
 
+    private static void OnSettingKeybindResetBindPostfix(object __instance)
+    {
+        RebindMenuInjector.NotifyNativeKeybindReset(__instance);
+    }
+
     private static void OnSettingKeybindOnDisablePostfix(object __instance)
     {
         RebindMenuInjector.NotifyNativeKeybindDisabled(__instance);
-    }
-
-    private static void OnHotkeyGateIsHotkeyInputEnabledPostfix(ref bool __result)
-    {
-        if (!__result) return;
-        if (!RebindMenuInjector.ShouldSuppressExternalHotkeys()) return;
-        __result = false;
     }
 
     internal static void LogTiming(string scope, long elapsedMs, bool detailed = false)

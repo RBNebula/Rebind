@@ -175,30 +175,8 @@ internal static partial class RebindMenuInjector
         private void Update()
         {
             if (_entry == null || _activeCapture != this) return;
-            if (_entry.Mode == RebindEntryMode.KeyCode)
-            {
-                UpdateSingleKeyCapture();
-                return;
-            }
-
-            if (_entry.Mode == RebindEntryMode.KeyboardShortcut)
-            {
-                UpdateShortcutCapture();
-            }
-        }
-
-        private void UpdateSingleKeyCapture()
-        {
-            if (!Input.anyKeyDown) return;
-
-            foreach (var key in AllKeys)
-            {
-                if (!Input.GetKeyDown(key)) continue;
-
-                var applied = TryApplyValueWithConflictCheck(key);
-                StopCapture(restoreValue: !applied);
-                return;
-            }
+            if (_entry.Mode == RebindEntryMode.InputAction) return;
+            UpdateShortcutCapture();
         }
 
         private void UpdateShortcutCapture()
@@ -292,9 +270,7 @@ internal static partial class RebindMenuInjector
             ResetShortcutCaptureState();
             if (_valueLabel != null)
             {
-                _valueLabel.text = _entry.Mode == RebindEntryMode.KeyboardShortcut
-                    ? "Press key or Ctrl/Shift/Alt..."
-                    : "Press key...";
+                _valueLabel.text = "Press key or Ctrl/Shift/Alt...";
             }
         }
 
@@ -321,13 +297,7 @@ internal static partial class RebindMenuInjector
                 return;
             }
 
-            if (_entry.Mode == RebindEntryMode.KeyboardShortcut)
-            {
-                ResetShortcutToDefault();
-                return;
-            }
-
-            ResetKeyToDefault();
+            ResetShortcutToDefault();
         }
 
         private void ResetInputActionToDefault()
@@ -361,17 +331,6 @@ internal static partial class RebindMenuInjector
 
             var appliedShortcut = TryApplyShortcutWithConflictCheck(_entry.DefaultShortcut);
             if (!appliedShortcut)
-            {
-                RefreshValueText();
-            }
-        }
-
-        private void ResetKeyToDefault()
-        {
-            if (_entry == null) return;
-
-            var applied = TryApplyValueWithConflictCheck(_entry.DefaultKey);
-            if (!applied)
             {
                 RefreshValueText();
             }
@@ -444,19 +403,6 @@ internal static partial class RebindMenuInjector
             ApplyInputActionChange();
         }
 
-        private bool TryApplyValueWithConflictCheck(KeyCode key)
-        {
-            if (_entry == null) return false;
-
-            var displayText = KeyDisplayFormatter.ToDisplayText(key);
-            var token = KeyDisplayFormatter.ToConflictToken(key);
-            return TryApplyWithConflictCheck(
-                displayText,
-                token,
-                shouldCheckConflict: key != KeyCode.None,
-                onApply: () => ApplyKeyValue(key));
-        }
-
         private bool TryApplyShortcutWithConflictCheck(KeyboardShortcut shortcut)
         {
             if (_entry == null) return false;
@@ -511,19 +457,6 @@ internal static partial class RebindMenuInjector
             return true;
         }
 
-        private void ApplyKeyValue(KeyCode key)
-        {
-            if (_entry == null) return;
-
-            ApplyWithRefresh(
-                applyAction: () =>
-                {
-                    _entry.Setter(key);
-                    InvokeChangedCallback(key);
-                },
-                keybindTitle: _entry.KeybindTitle);
-        }
-
         private void ApplyShortcutValue(KeyboardShortcut shortcut)
         {
             if (_entry == null) return;
@@ -532,7 +465,7 @@ internal static partial class RebindMenuInjector
                 applyAction: () =>
                 {
                     _entry.ShortcutSetter(shortcut);
-                    InvokeChangedCallback(KeyCode.None);
+                    InvokeChangedCallback();
                 },
                 keybindTitle: _entry.KeybindTitle);
         }
@@ -553,7 +486,7 @@ internal static partial class RebindMenuInjector
 
         private void ApplyInputActionChange()
         {
-            InvokeChangedCallback(KeyCode.None);
+            InvokeChangedCallback();
             RefreshAfterBindingMutation();
         }
 
@@ -732,12 +665,8 @@ internal static partial class RebindMenuInjector
                 var display = NativeKeybindBridge.GetBindingDisplayText(_entry.ActionReference, _entry.BindingIndex);
                 return string.IsNullOrWhiteSpace(display) ? "-" : display;
             }
-            if (_entry.Mode == RebindEntryMode.KeyboardShortcut)
-            {
-                return KeyDisplayFormatter.ToDisplayText(GetCurrentShortcutOrEmpty());
-            }
 
-            return KeyDisplayFormatter.ToDisplayText(GetCurrentKeyOrNone());
+            return KeyDisplayFormatter.ToDisplayText(GetCurrentShortcutOrEmpty());
         }
 
         private string GetCurrentConflictToken()
@@ -754,16 +683,7 @@ internal static partial class RebindMenuInjector
 
             var display = GetCurrentDisplayText();
             if (IsUnboundDisplay(display)) return string.Empty;
-            if (_entry.Mode == RebindEntryMode.KeyCode)
-            {
-                return KeyDisplayFormatter.ToConflictToken(GetCurrentKeyOrNone());
-            }
-            if (_entry.Mode == RebindEntryMode.KeyboardShortcut)
-            {
-                return KeyDisplayFormatter.ToConflictToken(GetCurrentShortcutOrEmpty());
-            }
-
-            return "disp:" + KeyDisplayFormatter.Normalize(display);
+            return KeyDisplayFormatter.ToConflictToken(GetCurrentShortcutOrEmpty());
         }
 
         private static bool IsUnboundDisplay(string display)
@@ -773,15 +693,11 @@ internal static partial class RebindMenuInjector
                    string.Equals(display, "Unbound", StringComparison.OrdinalIgnoreCase);
         }
 
-        private void InvokeChangedCallback(KeyCode key)
+        private void InvokeChangedCallback()
         {
             if (_entry == null) return;
 
-            if (_entry.Mode == RebindEntryMode.KeyCode)
-            {
-                _entry.OnChanged?.Invoke(key);
-            }
-            else if (_entry.Mode == RebindEntryMode.KeyboardShortcut)
+            if (_entry.Mode == RebindEntryMode.KeyboardShortcut)
             {
                 _entry.OnShortcutChanged?.Invoke(GetCurrentShortcutOrEmpty());
             }
@@ -808,10 +724,6 @@ internal static partial class RebindMenuInjector
         {
             if (_entry == null) return true;
 
-            if (_entry.Mode == RebindEntryMode.KeyCode)
-            {
-                return GetCurrentKeyOrNone() == _entry.DefaultKey;
-            }
             if (_entry.Mode == RebindEntryMode.KeyboardShortcut)
             {
                 return GetCurrentShortcutOrEmpty().Equals(_entry.DefaultShortcut);
@@ -829,19 +741,6 @@ internal static partial class RebindMenuInjector
             }
 
             return NativeKeybindBridge.IsUsingDefault(_entry.ActionReference, _entry.BindingIndex);
-        }
-
-        private KeyCode GetCurrentKeyOrNone()
-        {
-            if (_entry == null) return KeyCode.None;
-            try
-            {
-                return _entry.Getter();
-            }
-            catch
-            {
-                return KeyCode.None;
-            }
         }
 
         private KeyboardShortcut GetCurrentShortcutOrEmpty()

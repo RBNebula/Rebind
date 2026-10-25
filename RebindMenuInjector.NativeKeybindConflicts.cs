@@ -6,8 +6,8 @@ internal static partial class RebindMenuInjector
     private static readonly MethodInfo? SettingKeybindUpdateUiMethod = AccessTools.Method(SettingKeybindType, "UpdateUI");
     private static readonly Type? KeybindManagerType = AccessTools.TypeByName("KeybindManager");
     private static readonly PropertyInfo? KeybindManagerInstanceProperty = AccessTools.Property(KeybindManagerType, "Instance");
-    private static readonly PropertyInfo? KeybindManagerHasUnsavedChangesProperty = AccessTools.Property(KeybindManagerType, "HasUnsavedKeybindChanges");
-    private static readonly FieldInfo? KeybindManagerHasUnsavedChangesField = AccessTools.Field(KeybindManagerType, "HasUnsavedKeybindChanges");
+    private static readonly PropertyInfo? KeybindManagerHasUnsavedChangesProperty = GetPropertyIfExists(KeybindManagerType, "HasUnsavedKeybindChanges");
+    private static readonly FieldInfo? KeybindManagerHasUnsavedChangesField = GetFieldIfExists(KeybindManagerType, "HasUnsavedKeybindChanges");
 
     private sealed class PendingNativeRebindContext
     {
@@ -146,6 +146,20 @@ internal static partial class RebindMenuInjector
         }
 
         RebindConflictPrompt.ClearForOwner(settingObject);
+    }
+
+    public static void NotifyNativeKeybindReset(object settingKeybindInstance)
+    {
+        if (!TryGetNativeSettingAction(settingKeybindInstance, out var settingId, out _)) return;
+
+        lock (NativeRebindSync)
+        {
+            PendingNativeRebinds.Remove(settingId);
+            LastNativeConflictTokensBySettingId.Remove(settingId);
+        }
+
+        NativeKeybindBridge.InvalidateConflictCache();
+        RefreshConflictVisualsAfterNativeMutation();
     }
 
     private static void OnNativeRebindCompleted(object settingKeybindInstance, object actionEnum, string? previousOverridePath)
@@ -367,5 +381,17 @@ internal static partial class RebindMenuInjector
         {
             return null;
         }
+    }
+
+    private static PropertyInfo? GetPropertyIfExists(Type? type, string propertyName)
+    {
+        if (type == null || string.IsNullOrWhiteSpace(propertyName)) return null;
+        return type.GetProperty(propertyName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+    }
+
+    private static FieldInfo? GetFieldIfExists(Type? type, string fieldName)
+    {
+        if (type == null || string.IsNullOrWhiteSpace(fieldName)) return null;
+        return type.GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
     }
 }
